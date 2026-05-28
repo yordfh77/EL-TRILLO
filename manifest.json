@@ -1,0 +1,19 @@
+{
+  "short_name": "El Trillo",
+  "name": "El Trillo - Red Social Libre",
+  "description": "Red social y mercado libre para Cuba. Rápida, privada y de bajo consumo de datos.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "scope": "./",
+  "icons": [
+    {
+      "src": "logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

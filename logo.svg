@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Background -->
+  <rect width="512" height="512" rx="128" fill="#121212"/>
+  
+  <!-- Outer glowing path -->
+  <path d="M120 380 C 180 200, 320 200, 392 130" fill="none" stroke="url(#trailGrad)" stroke-width="28" stroke-linecap="round" opacity="0.15" />
+  
+  <!-- Actual winding trail -->
+  <path d="M120 380 C 180 230, 320 280, 392 130" fill="none" stroke="url(#trailGrad)" stroke-width="24" stroke-linecap="round" />
+  
+  <!-- Dynamic leaf / signpost at the end of the trail -->
+  <circle cx="392" cy="130" r="28" fill="#00E676" />
+  <circle cx="392" cy="130" r="12" fill="#121212" />
+
+  <!-- Stylized letter 'T' integrated subtly -->
+  <path d="M180 180 H 320 M250 180 V 300" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" opacity="0.1" />
+
+  <!-- Gradients -->
+  <defs>
+    <linearGradient id="trailGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00B0FF" />
+      <stop offset="60%" stop-color="#00E676" />
+      <stop offset="100%" stop-color="#B9F6CA" />
+    </linearGradient>
+  </defs>
+</svg>

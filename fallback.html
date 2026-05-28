@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>El Trillo - Sin Conexión</title>
+  <style>
+    :root {
+      --bg: #121212;
+      --card-bg: #1e1e1e;
+      --text: #e0e0e0;
+      --text-muted: #888888;
+      --primary: #00E676;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      text-align: center;
+      max-width: 400px;
+      background: var(--card-bg);
+      padding: 32px 24px;
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .icon-wrapper {
+      margin-bottom: 24px;
+    }
+
+    .icon-wrapper svg {
+      width: 80px;
+      height: 80px;
+      fill: none;
+      stroke: var(--primary);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      filter: drop-shadow(0 0 8px rgba(0, 230, 118, 0.3));
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+
+    p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+
+    .btn-retry {
+      display: inline-block;
+      width: 100%;
+      background: var(--primary);
+      color: #121212;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      font-size: 0.95rem;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s, background-color 0.2s;
+    }
+
+    .btn-retry:active {
+      transform: scale(0.98);
+      background-color: #00c853;
+    }
+
+    .tip {
+      margin-top: 24px;
+      font-size: 0.8rem;
+      color: #555;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      padding-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon-wrapper">
+      <svg viewBox="0 0 24 24">
+        <!-- Winding trail with slash (disconnected) -->
+        <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.5M5 12.5a10.94 10.94 0 0 1 5.83-2.84M8.5 16a6 6 0 0 1 7 0" />
+        <line x1="12" y1="20" x2="12.01" y2="20" stroke-width="4" />
+      </svg>
+    </div>
+    <h1>Sin conexión a la red</h1>
+    <p>El Trillo no puede conectar con el servidor en este momento. La red móvil de ETECSA podría estar experimentando interrupciones o te has quedado sin cobertura.</p>
+    <button class="btn-retry" onclick="window.location.reload()">Reintentar conexión</button>
+    
+    <div class="tip">
+      Consejo: Puedes seguir navegando por las partes ya cargadas de tu perfil y posts guardados sin gastar megas.
+    </div>
+  </div>
+</body>
+</html>
