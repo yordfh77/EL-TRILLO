@@ -1,9 +1,9 @@
 // EL TRILLO - SERVICE WORKER
 // Designed to minimize data usage over ETECSA mobile networks in Cuba.
 
-const CACHE_NAME = 'el-trillo-static-v5';
-const CDN_CACHE_NAME = 'el-trillo-cdn-v5';
-const DYNAMIC_CACHE_NAME = 'el-trillo-dynamic-v5';
+const CACHE_NAME = 'el-trillo-static-v6';
+const CDN_CACHE_NAME = 'el-trillo-cdn-v6';
+const DYNAMIC_CACHE_NAME = 'el-trillo-dynamic-v6';
 
 const STATIC_ASSETS = [
   './',

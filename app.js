@@ -1192,14 +1192,14 @@ async function loadMarketplaceListings() {
 
 async function uploadAudioMessage(blob) {
   try {
-    const extension = blob.type.includes('webm') ? 'webm' : 'ogg';
+    const extension = blob.type.includes('wav') ? 'wav' : 'webm';
     const filename = `${Date.now()}_${Math.floor(Math.random() * 1000)}.${extension}`;
     const fullPath = `chat-audio/${filename}`;
 
     const { error } = await supabase.storage
       .from('el-trillo-media')
       .upload(fullPath, blob, {
-        contentType: blob.type || 'audio/webm',
+        contentType: blob.type || 'audio/wav',
         cacheControl: '3600'
       });
 
@@ -1586,20 +1586,42 @@ async function toggleAudioRecording(recipientId) {
     return;
   }
 
-  if (!navigator.mediaDevices || !window.MediaRecorder) {
+  if (!navigator.mediaDevices || !(window.AudioContext || window.webkitAudioContext)) {
     showToast("Tu navegador no permite grabar audio en esta app.", "error");
     return;
   }
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : '';
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const audioContext = new AudioContextClass();
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
     state.audioChunks = [];
-    state.audioRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
     state.audioRecordStartedAt = Date.now();
+    state.audioRecorder = {
+      state: 'recording',
+      stop: () => stopWavRecording(recipientId),
+      stream,
+      audioContext,
+      source,
+      processor,
+      sampleRate: audioContext.sampleRate
+    };
+
+    processor.onaudioprocess = (event) => {
+      if (!state.audioRecorder || state.audioRecorder.state !== 'recording') return;
+
+      const input = event.inputBuffer.getChannelData(0);
+      state.audioChunks.push(new Float32Array(input));
+
+      const output = event.outputBuffer.getChannelData(0);
+      output.fill(0);
+    };
+
+    source.connect(processor);
+    processor.connect(audioContext.destination);
 
     const recordButton = document.getElementById('btn-record-audio');
     const recordIcon = document.getElementById('audio-record-icon');
@@ -1620,42 +1642,120 @@ async function toggleAudioRecording(recipientId) {
       }
     }, 500);
 
-    state.audioRecorder.addEventListener('dataavailable', (event) => {
-      if (event.data && event.data.size > 0) {
-        state.audioChunks.push(event.data);
-      }
-    });
-
-    state.audioRecorder.addEventListener('stop', async () => {
-      stream.getTracks().forEach(track => track.stop());
-      clearInterval(state.audioRecordTimer);
-      state.audioRecordTimer = null;
-
-      recordButton.classList.remove('recording');
-      recordIcon.textContent = 'Mic';
-      status.classList.add('hidden');
-
-      const duration = Math.max(1, Math.round((Date.now() - state.audioRecordStartedAt) / 1000));
-      const blobType = state.audioRecorder.mimeType || 'audio/webm';
-      const audioBlob = new Blob(state.audioChunks, { type: blobType });
-
-      state.audioRecorder = null;
-      state.audioChunks = [];
-      state.audioRecordStartedAt = null;
-
-      if (audioBlob.size < 800) {
-        showToast("El audio fue demasiado corto.", "info");
-        return;
-      }
-
-      showToast("Enviando audio...", "info");
-      await sendAudioMessage(recipientId, audioBlob, duration);
-    });
-
-    state.audioRecorder.start();
     showToast("Grabando audio. Toca Enviar para mandarlo.", "info");
   } catch (err) {
     showToast("No se pudo acceder al micrófono.", "error");
+  }
+}
+
+async function stopWavRecording(recipientId) {
+  const recorder = state.audioRecorder;
+  if (!recorder || recorder.state !== 'recording') return;
+
+  recorder.state = 'stopped';
+
+  clearInterval(state.audioRecordTimer);
+  state.audioRecordTimer = null;
+
+  const recordButton = document.getElementById('btn-record-audio');
+  const recordIcon = document.getElementById('audio-record-icon');
+  const status = document.getElementById('audio-record-status');
+
+  if (recordButton) recordButton.classList.remove('recording');
+  if (recordIcon) recordIcon.textContent = 'Mic';
+  if (status) status.classList.add('hidden');
+
+  try {
+    recorder.processor.disconnect();
+    recorder.source.disconnect();
+    recorder.stream.getTracks().forEach(track => track.stop());
+    await recorder.audioContext.close();
+  } catch (err) {}
+
+  const duration = Math.max(1, Math.round((Date.now() - state.audioRecordStartedAt) / 1000));
+  const audioBlob = encodeWavBlob(state.audioChunks, recorder.sampleRate, 16000);
+
+  state.audioRecorder = null;
+  state.audioChunks = [];
+  state.audioRecordStartedAt = null;
+
+  if (audioBlob.size < 800) {
+    showToast("El audio fue demasiado corto.", "info");
+    return;
+  }
+
+  showToast("Enviando audio compatible con iPhone...", "info");
+  await sendAudioMessage(recipientId, audioBlob, duration);
+}
+
+function encodeWavBlob(buffers, sourceSampleRate, targetSampleRate = 16000) {
+  const samples = mergeAudioBuffers(buffers);
+  const downsampled = downsampleAudio(samples, sourceSampleRate, targetSampleRate);
+  const wavBuffer = new ArrayBuffer(44 + downsampled.length * 2);
+  const view = new DataView(wavBuffer);
+
+  writeWavString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + downsampled.length * 2, true);
+  writeWavString(view, 8, 'WAVE');
+  writeWavString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, targetSampleRate, true);
+  view.setUint32(28, targetSampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeWavString(view, 36, 'data');
+  view.setUint32(40, downsampled.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < downsampled.length; i++) {
+    const sample = Math.max(-1, Math.min(1, downsampled[i]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+    offset += 2;
+  }
+
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+function mergeAudioBuffers(buffers) {
+  const totalLength = buffers.reduce((sum, buffer) => sum + buffer.length, 0);
+  const result = new Float32Array(totalLength);
+  let offset = 0;
+
+  buffers.forEach(buffer => {
+    result.set(buffer, offset);
+    offset += buffer.length;
+  });
+
+  return result;
+}
+
+function downsampleAudio(samples, sourceSampleRate, targetSampleRate) {
+  if (sourceSampleRate <= targetSampleRate) return samples;
+
+  const ratio = sourceSampleRate / targetSampleRate;
+  const newLength = Math.round(samples.length / ratio);
+  const result = new Float32Array(newLength);
+
+  for (let i = 0; i < newLength; i++) {
+    const start = Math.floor(i * ratio);
+    const end = Math.min(Math.floor((i + 1) * ratio), samples.length);
+    let sum = 0;
+
+    for (let j = start; j < end; j++) {
+      sum += samples[j];
+    }
+
+    result[i] = sum / Math.max(1, end - start);
+  }
+
+  return result;
+}
+
+function writeWavString(view, offset, value) {
+  for (let i = 0; i < value.length; i++) {
+    view.setUint8(offset + i, value.charCodeAt(i));
   }
 }
 
