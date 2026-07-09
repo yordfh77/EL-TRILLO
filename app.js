@@ -58,6 +58,10 @@ const state = {
   activePenaId: null,
   activeChatUserId: null,
   chatRefreshTimer: null,
+  audioRecorder: null,
+  audioChunks: [],
+  audioRecordStartedAt: null,
+  audioRecordTimer: null,
   filters: {
     muro: { province: '', municipality: '', tag: '' },
     mercado: { province: '', municipality: '', category: '' }
@@ -1186,6 +1190,39 @@ async function loadMarketplaceListings() {
   }
 }
 
+async function uploadAudioMessage(blob) {
+  try {
+    const extension = blob.type.includes('webm') ? 'webm' : 'ogg';
+    const filename = `${Date.now()}_${Math.floor(Math.random() * 1000)}.${extension}`;
+    const fullPath = `chat-audio/${filename}`;
+
+    const { error } = await supabase.storage
+      .from('el-trillo-media')
+      .upload(fullPath, blob, {
+        contentType: blob.type || 'audio/webm',
+        cacheControl: '3600'
+      });
+
+    if (error) {
+      console.warn("Audio upload failed, falling back to base64 inline string:", error.message);
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = () => resolve(reader.result);
+      });
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('el-trillo-media')
+      .getPublicUrl(fullPath);
+
+    return publicUrlData.publicUrl;
+  } catch (err) {
+    console.error("Audio storage error:", err);
+    return null;
+  }
+}
+
 // ====================================================
 // VIEW RENDERER 4: CHAT PRIVADO
 // ====================================================
@@ -1427,8 +1464,12 @@ async function renderChatThread(userId) {
 
         <form class="chat-compose" id="chat-compose-form">
           <textarea id="chat-message-input" rows="1" maxlength="800" placeholder="Escribe un mensaje privado..."></textarea>
+          <button class="btn-secondary btn-sm btn-audio-record" id="btn-record-audio" type="button" aria-label="Grabar audio">
+            <span id="audio-record-icon">Mic</span>
+          </button>
           <button class="btn-primary btn-sm" type="submit">Enviar</button>
         </form>
+        <div class="audio-record-status hidden" id="audio-record-status">Grabando audio: <span id="audio-record-time">0:00</span></div>
       </div>
     `;
 
@@ -1436,6 +1477,9 @@ async function renderChatThread(userId) {
     document.getElementById('chat-compose-form').addEventListener('submit', (e) => {
       e.preventDefault();
       sendPrivateMessage(userId);
+    });
+    document.getElementById('btn-record-audio').addEventListener('click', () => {
+      toggleAudioRecording(userId);
     });
 
     await loadPrivateMessages(userId);
@@ -1484,9 +1528,12 @@ async function loadPrivateMessages(otherUserId, showLoading = true) {
       const bubble = document.createElement('div');
       const isMine = message.sender_id === userId;
       bubble.className = `chat-message ${isMine ? 'mine' : 'theirs'}`;
+      const messageBody = message.message_type === 'audio' && message.audio_url
+        ? `<audio class="chat-audio-player" controls preload="metadata" src="${message.audio_url}"></audio>`
+        : `<div class="chat-message-text">${escapeHTML(message.content)}</div>`;
       bubble.innerHTML = `
         <div class="chat-bubble">
-          <div class="chat-message-text">${escapeHTML(message.content)}</div>
+          ${messageBody}
           <div class="chat-message-time">${formatChatTime(message.created_at)}</div>
         </div>
       `;
@@ -1531,9 +1578,125 @@ async function sendPrivateMessage(recipientId) {
   }
 }
 
+async function toggleAudioRecording(recipientId) {
+  if (!state.user) return;
+
+  if (state.audioRecorder && state.audioRecorder.state === 'recording') {
+    state.audioRecorder.stop();
+    return;
+  }
+
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    showToast("Tu navegador no permite grabar audio en esta app.", "error");
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : '';
+
+    state.audioChunks = [];
+    state.audioRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    state.audioRecordStartedAt = Date.now();
+
+    const recordButton = document.getElementById('btn-record-audio');
+    const recordIcon = document.getElementById('audio-record-icon');
+    const status = document.getElementById('audio-record-status');
+    const timeLabel = document.getElementById('audio-record-time');
+
+    recordButton.classList.add('recording');
+    recordIcon.textContent = 'Enviar';
+    status.classList.remove('hidden');
+    timeLabel.textContent = '0:00';
+
+    state.audioRecordTimer = setInterval(() => {
+      const seconds = Math.floor((Date.now() - state.audioRecordStartedAt) / 1000);
+      timeLabel.textContent = formatAudioDuration(seconds);
+
+      if (seconds >= 60 && state.audioRecorder && state.audioRecorder.state === 'recording') {
+        state.audioRecorder.stop();
+      }
+    }, 500);
+
+    state.audioRecorder.addEventListener('dataavailable', (event) => {
+      if (event.data && event.data.size > 0) {
+        state.audioChunks.push(event.data);
+      }
+    });
+
+    state.audioRecorder.addEventListener('stop', async () => {
+      stream.getTracks().forEach(track => track.stop());
+      clearInterval(state.audioRecordTimer);
+      state.audioRecordTimer = null;
+
+      recordButton.classList.remove('recording');
+      recordIcon.textContent = 'Mic';
+      status.classList.add('hidden');
+
+      const duration = Math.max(1, Math.round((Date.now() - state.audioRecordStartedAt) / 1000));
+      const blobType = state.audioRecorder.mimeType || 'audio/webm';
+      const audioBlob = new Blob(state.audioChunks, { type: blobType });
+
+      state.audioRecorder = null;
+      state.audioChunks = [];
+      state.audioRecordStartedAt = null;
+
+      if (audioBlob.size < 800) {
+        showToast("El audio fue demasiado corto.", "info");
+        return;
+      }
+
+      showToast("Enviando audio...", "info");
+      await sendAudioMessage(recipientId, audioBlob, duration);
+    });
+
+    state.audioRecorder.start();
+    showToast("Grabando audio. Toca Enviar para mandarlo.", "info");
+  } catch (err) {
+    showToast("No se pudo acceder al micrófono.", "error");
+  }
+}
+
+async function sendAudioMessage(recipientId, audioBlob, durationSeconds) {
+  try {
+    const audioUrl = await uploadAudioMessage(audioBlob);
+    if (!audioUrl) {
+      throw new Error("No se pudo guardar el audio.");
+    }
+
+    const { error } = await supabase
+      .from('private_messages')
+      .insert({
+        sender_id: state.user.id,
+        recipient_id: recipientId,
+        content: `Mensaje de audio (${formatAudioDuration(durationSeconds)})`,
+        message_type: 'audio',
+        audio_url: audioUrl,
+        audio_duration_seconds: durationSeconds
+      });
+
+    if (error) throw error;
+
+    await loadPrivateMessages(recipientId, false);
+  } catch (err) {
+    showToast("No se pudo enviar el audio: " + err.message, "error");
+  }
+}
+
 function formatChatPreview(message) {
   const prefix = message.sender_id === state.user.id ? 'Tu: ' : '';
+  if (message.message_type === 'audio') {
+    return `${prefix}Audio`;
+  }
   return prefix + (message.content || '').slice(0, 80);
+}
+
+function formatAudioDuration(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function formatChatTime(value) {

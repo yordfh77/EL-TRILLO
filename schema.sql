@@ -206,8 +206,15 @@ CREATE TABLE public.private_messages (
     sender_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
     recipient_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
     content TEXT NOT NULL CHECK (char_length(content) BETWEEN 1 AND 800),
+    message_type VARCHAR(20) DEFAULT 'text' NOT NULL CHECK (message_type IN ('text', 'audio')),
+    audio_url TEXT,
+    audio_duration_seconds INTEGER,
     read_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT private_messages_audio_payload CHECK (
+        message_type = 'text'
+        OR (audio_url IS NOT NULL AND audio_duration_seconds IS NOT NULL AND audio_duration_seconds BETWEEN 1 AND 60)
+    ),
     CONSTRAINT private_messages_no_self_message CHECK (sender_id <> recipient_id)
 );
 
