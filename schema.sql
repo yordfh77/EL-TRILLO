@@ -198,6 +198,52 @@ CREATE POLICY "Sellers can delete their own listings"
 ON public.marketplace_listings FOR DELETE 
 USING (auth.uid() = user_id);
 
+-- ----------------------------------------------------
+-- 7. PRIVATE MESSAGES TABLE
+-- ----------------------------------------------------
+CREATE TABLE public.private_messages (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    sender_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+    recipient_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+    content TEXT NOT NULL CHECK (char_length(content) BETWEEN 1 AND 800),
+    read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT private_messages_no_self_message CHECK (sender_id <> recipient_id)
+);
+
+-- Helpful indexes for loading inboxes and conversation threads quickly
+CREATE INDEX private_messages_sender_created_idx
+ON public.private_messages (sender_id, created_at DESC);
+
+CREATE INDEX private_messages_recipient_created_idx
+ON public.private_messages (recipient_id, created_at DESC);
+
+CREATE INDEX private_messages_thread_created_idx
+ON public.private_messages (sender_id, recipient_id, created_at ASC);
+
+-- Enable RLS on Private Messages
+ALTER TABLE public.private_messages ENABLE ROW LEVEL SECURITY;
+
+-- Keep message edits closed; recipients only need to update read_at.
+REVOKE UPDATE ON public.private_messages FROM authenticated;
+GRANT UPDATE (read_at) ON public.private_messages TO authenticated;
+
+-- Only the sender and recipient can read a private message
+CREATE POLICY "Users can read their own private messages"
+ON public.private_messages FOR SELECT
+USING (auth.uid() = sender_id OR auth.uid() = recipient_id);
+
+-- Authenticated users can send messages as themselves
+CREATE POLICY "Users can send private messages"
+ON public.private_messages FOR INSERT
+WITH CHECK (auth.uid() = sender_id AND sender_id <> recipient_id);
+
+-- Recipients can mark messages as read
+CREATE POLICY "Recipients can mark private messages as read"
+ON public.private_messages FOR UPDATE
+USING (auth.uid() = recipient_id)
+WITH CHECK (auth.uid() = recipient_id);
+
 
 -- ====================================================
 -- PRIVACY DESIGN: ANONYMOUS VIEWS FOR POSTS & COMMENTS

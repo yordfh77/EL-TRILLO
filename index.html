@@ -28,7 +28,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
   <!-- Core App Stylesheet -->
-  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="app.css?v=chat-v1">
 
   <!-- Supabase Client Library (Cached by Service Worker) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -410,6 +410,13 @@
       </svg>
       <span class="nav-label">Mercado</span>
     </a>
+    <a href="#" class="nav-item" data-view="chat" id="nav-item-chat">
+      <svg viewBox="0 0 24 24" class="nav-icon" width="24" height="24">
+        <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
+        <path d="M8 9h8M8 13h5"/>
+      </svg>
+      <span class="nav-label">Chat</span>
+    </a>
     <a href="#" class="nav-item" data-view="perfil" id="nav-item-perfil">
       <svg viewBox="0 0 24 24" class="nav-icon" width="24" height="24">
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v-2"/>
@@ -420,6 +427,6 @@
   </nav>
 
   <!-- Core App Controller Script -->
-  <script src="app.js"></script>
+  <script src="app.js?v=chat-v1"></script>
 </body>
 </html>

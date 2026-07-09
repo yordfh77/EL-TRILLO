@@ -56,6 +56,8 @@ const state = {
   profile: null,
   activeView: 'muro',
   activePenaId: null,
+  activeChatUserId: null,
+  chatRefreshTimer: null,
   filters: {
     muro: { province: '', municipality: '', tag: '' },
     mercado: { province: '', municipality: '', category: '' }
@@ -313,6 +315,11 @@ async function uploadCompressedImage(blob, path) {
 // 8. NAVIGATION VIEWS ROUTER
 function setView(viewName, params = {}) {
   state.activeView = viewName;
+
+  if (state.chatRefreshTimer) {
+    clearInterval(state.chatRefreshTimer);
+    state.chatRefreshTimer = null;
+  }
   
   // Highlight active nav item
   DOM.navItems.forEach(item => {
@@ -339,6 +346,15 @@ function setView(viewName, params = {}) {
       break;
     case 'mercado':
       renderMercado();
+      break;
+    case 'chat':
+      if (params.userId) {
+        state.activeChatUserId = params.userId;
+        renderChatThread(params.userId);
+      } else {
+        state.activeChatUserId = null;
+        renderChatList();
+      }
       break;
     case 'perfil':
       renderPerfil();
@@ -1171,7 +1187,369 @@ async function loadMarketplaceListings() {
 }
 
 // ====================================================
-// VIEW RENDERER 4: MI PERFIL (USER PROFILE & SETTINGS)
+// VIEW RENDERER 4: CHAT PRIVADO
+// ====================================================
+async function renderChatList() {
+  if (!state.user) {
+    DOM.viewport.innerHTML = `
+      <div class="auth-prompt-panel">
+        <svg viewBox="0 0 24 24" width="60" height="60" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
+          <path d="M8 9h8M8 13h5"/>
+        </svg>
+        <h2>Chat privado</h2>
+        <p>Inicia sesion para enviar y recibir mensajes privados con otros usuarios.</p>
+        <button class="btn-primary" id="btn-trigger-auth-chat">Identificarse / Registrarse</button>
+      </div>
+    `;
+
+    document.getElementById('btn-trigger-auth-chat').addEventListener('click', () => {
+      showModal(DOM.authModal);
+    });
+    return;
+  }
+
+  DOM.viewport.innerHTML = `
+    <div class="feed-header-actions">
+      <h3>Mensajes</h3>
+      <button class="btn-secondary btn-sm" id="btn-refresh-chat">Actualizar</button>
+    </div>
+
+    <div class="chat-search-panel">
+      <label for="chat-user-search">Buscar usuario</label>
+      <div class="chat-search-row">
+        <input type="text" id="chat-user-search" placeholder="Alias o nombre..." maxlength="50">
+        <button class="btn-primary btn-sm" id="btn-search-users">Buscar</button>
+      </div>
+      <div class="chat-search-results" id="chat-search-results"></div>
+    </div>
+
+    <div class="chat-section-title">Conversaciones recientes</div>
+    <div class="chat-list" id="chat-list-container">
+      <div class="view-loading">
+        <div class="spinner"></div>
+        <p>Cargando mensajes...</p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('btn-refresh-chat').addEventListener('click', () => {
+    loadChatConversations();
+    showToast("Mensajes actualizados", "success");
+  });
+
+  document.getElementById('btn-search-users').addEventListener('click', searchChatUsers);
+  document.getElementById('chat-user-search').addEventListener('input', debounce(searchChatUsers, 450));
+  document.getElementById('chat-user-search').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      searchChatUsers();
+    }
+  });
+
+  loadChatConversations();
+}
+
+async function searchChatUsers() {
+  const input = document.getElementById('chat-user-search');
+  const results = document.getElementById('chat-search-results');
+  if (!input || !results || !state.user) return;
+
+  const term = input.value.trim();
+  if (term.length < 2) {
+    results.innerHTML = '';
+    return;
+  }
+
+  results.innerHTML = `<span class="chat-muted">Buscando...</span>`;
+
+  try {
+    const safeTerm = term.replace(/[%_,]/g, '');
+    const { data: users, error } = await supabase
+      .from('profiles')
+      .select('id, username, display_name, avatar_url, province')
+      .or(`username.ilike.%${safeTerm}%,display_name.ilike.%${safeTerm}%`)
+      .neq('id', state.user.id)
+      .limit(8);
+
+    if (error) throw error;
+
+    if (!users || users.length === 0) {
+      results.innerHTML = `<span class="chat-muted">No encontramos usuarios con ese nombre.</span>`;
+      return;
+    }
+
+    results.innerHTML = '';
+    users.forEach(user => {
+      results.appendChild(createChatUserRow(user, 'Abrir chat'));
+    });
+  } catch (err) {
+    results.innerHTML = `<span class="chat-error">Error al buscar usuarios.</span>`;
+  }
+}
+
+async function loadChatConversations() {
+  const container = document.getElementById('chat-list-container');
+  if (!container || !state.user) return;
+
+  try {
+    const [sentResult, receivedResult] = await Promise.all([
+      supabase
+        .from('private_messages')
+        .select('*')
+        .eq('sender_id', state.user.id)
+        .order('created_at', { ascending: false })
+        .limit(50),
+      supabase
+        .from('private_messages')
+        .select('*')
+        .eq('recipient_id', state.user.id)
+        .order('created_at', { ascending: false })
+        .limit(50)
+    ]);
+
+    if (sentResult.error) throw sentResult.error;
+    if (receivedResult.error) throw receivedResult.error;
+
+    const messages = [...(sentResult.data || []), ...(receivedResult.data || [])]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    const latestByUser = new Map();
+    messages.forEach(message => {
+      const otherId = message.sender_id === state.user.id ? message.recipient_id : message.sender_id;
+      if (!latestByUser.has(otherId)) {
+        latestByUser.set(otherId, message);
+      }
+    });
+
+    if (latestByUser.size === 0) {
+      container.innerHTML = `
+        <div class="chat-empty-state">
+          <h3>No tienes conversaciones todavia</h3>
+          <p>Busca un usuario arriba y abre un chat privado.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const userIds = Array.from(latestByUser.keys());
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id, username, display_name, avatar_url, province')
+      .in('id', userIds);
+
+    if (profilesError) throw profilesError;
+
+    const profilesById = new Map((profiles || []).map(profile => [profile.id, profile]));
+    container.innerHTML = '';
+
+    userIds.forEach(userId => {
+      const profile = profilesById.get(userId);
+      const message = latestByUser.get(userId);
+      if (!profile || !message) return;
+
+      const row = createChatUserRow(profile, formatChatPreview(message), message);
+      container.appendChild(row);
+    });
+  } catch (err) {
+    container.innerHTML = `<p class="text-center" style="color:var(--error);">Error al cargar mensajes. Ejecuta el SQL del chat en Supabase si aun no lo hiciste.</p>`;
+  }
+}
+
+function createChatUserRow(user, detail, message = null) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'chat-user-row';
+  row.dataset.userId = user.id;
+
+  const name = user.display_name || user.username || 'Usuario';
+  const avatar = user.avatar_url
+    ? `<img src="${user.avatar_url}" alt="Avatar">`
+    : `<span>${escapeHTML(name.charAt(0).toUpperCase())}</span>`;
+  const formattedTime = message ? formatChatTime(message.created_at) : '';
+  const unreadClass = message && message.recipient_id === state.user.id && !message.read_at ? ' unread' : '';
+
+  row.innerHTML = `
+    <div class="chat-avatar">${avatar}</div>
+    <div class="chat-user-main">
+      <div class="chat-user-topline">
+        <span class="chat-user-name">${escapeHTML(name)}</span>
+        ${formattedTime ? `<span class="chat-time">${formattedTime}</span>` : ''}
+      </div>
+      <div class="chat-user-detail${unreadClass}">${escapeHTML(detail || '@' + user.username)}</div>
+    </div>
+  `;
+
+  row.addEventListener('click', () => {
+    setView('chat', { userId: user.id });
+  });
+
+  return row;
+}
+
+async function renderChatThread(userId) {
+  if (!state.user) {
+    setView('chat');
+    return;
+  }
+
+  try {
+    const { data: otherUser, error } = await supabase
+      .from('profiles')
+      .select('id, username, display_name, avatar_url, province')
+      .eq('id', userId)
+      .single();
+
+    if (error) throw error;
+
+    const name = otherUser.display_name || otherUser.username || 'Usuario';
+    const avatar = otherUser.avatar_url
+      ? `<img src="${otherUser.avatar_url}" alt="Avatar">`
+      : `<span>${escapeHTML(name.charAt(0).toUpperCase())}</span>`;
+
+    DOM.viewport.innerHTML = `
+      <div class="chat-thread">
+        <div class="chat-thread-header">
+          <button class="btn-secondary btn-sm" id="btn-back-chat">Volver</button>
+          <div class="chat-avatar small">${avatar}</div>
+          <div class="chat-thread-title">
+            <h3>${escapeHTML(name)}</h3>
+            <span>@${escapeHTML(otherUser.username || 'usuario')}</span>
+          </div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages-container">
+          <div class="view-loading">
+            <div class="spinner"></div>
+            <p>Cargando chat...</p>
+          </div>
+        </div>
+
+        <form class="chat-compose" id="chat-compose-form">
+          <textarea id="chat-message-input" rows="1" maxlength="800" placeholder="Escribe un mensaje privado..."></textarea>
+          <button class="btn-primary btn-sm" type="submit">Enviar</button>
+        </form>
+      </div>
+    `;
+
+    document.getElementById('btn-back-chat').addEventListener('click', () => setView('chat'));
+    document.getElementById('chat-compose-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      sendPrivateMessage(userId);
+    });
+
+    await loadPrivateMessages(userId);
+    state.chatRefreshTimer = setInterval(() => loadPrivateMessages(userId, false), 5000);
+  } catch (err) {
+    DOM.viewport.innerHTML = `<p class="text-center" style="color:var(--error);">No se pudo abrir este chat.</p>`;
+  }
+}
+
+async function loadPrivateMessages(otherUserId, showLoading = true) {
+  const container = document.getElementById('chat-messages-container');
+  if (!container || !state.user) return;
+
+  if (showLoading) {
+    container.innerHTML = `
+      <div class="view-loading">
+        <div class="spinner"></div>
+        <p>Cargando chat...</p>
+      </div>
+    `;
+  }
+
+  try {
+    const userId = state.user.id;
+    const { data: messages, error } = await supabase
+      .from('private_messages')
+      .select('*')
+      .or(`and(sender_id.eq.${userId},recipient_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},recipient_id.eq.${userId})`)
+      .order('created_at', { ascending: true })
+      .limit(200);
+
+    if (error) throw error;
+
+    if (!messages || messages.length === 0) {
+      container.innerHTML = `
+        <div class="chat-empty-state compact">
+          <h3>Empieza la conversacion</h3>
+          <p>Este chat es privado entre ustedes dos.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = '';
+    messages.forEach(message => {
+      const bubble = document.createElement('div');
+      const isMine = message.sender_id === userId;
+      bubble.className = `chat-message ${isMine ? 'mine' : 'theirs'}`;
+      bubble.innerHTML = `
+        <div class="chat-bubble">
+          <div class="chat-message-text">${escapeHTML(message.content)}</div>
+          <div class="chat-message-time">${formatChatTime(message.created_at)}</div>
+        </div>
+      `;
+      container.appendChild(bubble);
+    });
+
+    container.scrollTop = container.scrollHeight;
+
+    await supabase
+      .from('private_messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('sender_id', otherUserId)
+      .eq('recipient_id', userId)
+      .is('read_at', null);
+  } catch (err) {
+    container.innerHTML = `<p class="text-center" style="color:var(--error);">Error al cargar el chat.</p>`;
+  }
+}
+
+async function sendPrivateMessage(recipientId) {
+  const input = document.getElementById('chat-message-input');
+  if (!input || !state.user) return;
+
+  const content = input.value.trim();
+  if (!content) return;
+
+  try {
+    const { error } = await supabase
+      .from('private_messages')
+      .insert({
+        sender_id: state.user.id,
+        recipient_id: recipientId,
+        content: content
+      });
+
+    if (error) throw error;
+
+    input.value = '';
+    await loadPrivateMessages(recipientId, false);
+  } catch (err) {
+    showToast("No se pudo enviar el mensaje: " + err.message, "error");
+  }
+}
+
+function formatChatPreview(message) {
+  const prefix = message.sender_id === state.user.id ? 'Tu: ' : '';
+  return prefix + (message.content || '').slice(0, 80);
+}
+
+function formatChatTime(value) {
+  const date = new Date(value);
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+
+  if (sameDay) {
+    return date.toLocaleTimeString('es-CU', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  return date.toLocaleDateString('es-CU', { month: 'short', day: 'numeric' });
+}
+
+// ====================================================
+// VIEW RENDERER 5: MI PERFIL (USER PROFILE & SETTINGS)
 // ====================================================
 async function renderPerfil() {
   if (!state.user) {
