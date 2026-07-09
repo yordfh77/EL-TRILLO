@@ -64,8 +64,23 @@ const state = {
     post: null,
     listing: null
   },
+  theme: localStorage.getItem('elTrilloTheme') || 'dark',
   deferredPrompt: null // For PWA install
 };
+
+function applyTheme(theme) {
+  const nextTheme = theme === 'light' ? 'light' : 'dark';
+  state.theme = nextTheme;
+  document.documentElement.setAttribute('data-theme', nextTheme);
+  localStorage.setItem('elTrilloTheme', nextTheme);
+
+  const themeColor = document.querySelector('meta[name="theme-color"]');
+  if (themeColor) {
+    themeColor.setAttribute('content', nextTheme === 'light' ? '#f5f7f4' : '#121212');
+  }
+}
+
+applyTheme(state.theme);
 
 // 4. IN-MEMORY DOM CACHE
 const DOM = {
@@ -1182,6 +1197,7 @@ async function renderPerfil() {
   const displayUsername = state.profile ? state.profile.username : 'trillador';
   const displayName = state.profile ? state.profile.display_name : 'Usuario de El Trillo';
   const isAnonymousUser = state.profile ? state.profile.is_anonymous : false;
+  const isLightTheme = state.theme === 'light';
   
   let avatarHtml = `<span style="font-size:2.5rem;">👤</span>`;
   if (state.profile && state.profile.avatar_url) {
@@ -1237,6 +1253,9 @@ async function renderPerfil() {
       </div>
       
       <div style="width:100%; display:flex; flex-direction:column; gap:10px; margin-top:8px;">
+        <button class="btn-secondary full-width btn-sm" id="btn-toggle-theme">
+          ${isLightTheme ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro'}
+        </button>
         <button class="btn-secondary full-width btn-sm" id="btn-toggle-anon-settings">
           Cambiar privacidad predeterminada
         </button>
@@ -1260,6 +1279,14 @@ async function renderPerfil() {
       </p>
     </div>
   `;
+
+  // Theme mode trigger
+  document.getElementById('btn-toggle-theme').addEventListener('click', () => {
+    const nextTheme = state.theme === 'light' ? 'dark' : 'light';
+    applyTheme(nextTheme);
+    showToast(nextTheme === 'light' ? "Modo claro activado" : "Modo oscuro activado", "success");
+    renderPerfil();
+  });
 
   // Change privacy trigger
   document.getElementById('btn-toggle-anon-settings').addEventListener('click', async () => {

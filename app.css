@@ -4,6 +4,8 @@
    ==================================================== */
 
 :root {
+  color-scheme: dark;
+
   /* HSL Tailored Color Palette */
   --bg: #0c0c0e;
   --bg-card: #16161a;
@@ -38,6 +40,36 @@
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f5f7f4;
+  --bg-card: #ffffff;
+  --bg-elevated: #edf2ee;
+  --bg-glass: rgba(255, 255, 255, 0.88);
+
+  --primary: #008f4c;
+  --primary-glow: rgba(0, 143, 76, 0.14);
+  --primary-hover: #007a41;
+  --accent: #006fbf;
+
+  --whatsapp: #128c4a;
+  --whatsapp-hover: #0f7b40;
+
+  --text: #121417;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+
+  --border: rgba(17, 24, 39, 0.1);
+  --border-active: rgba(0, 143, 76, 0.34);
+
+  --error: #c62828;
+  --success: #15803d;
+  --warning: #b7791f;
+
+  --shadow: 0 4px 20px rgba(15, 23, 42, 0.12);
+}
+
 /* Base resets */
 * {
   box-sizing: border-box;
@@ -63,6 +95,12 @@ body {
   border-right: 1px solid rgba(255, 255, 255, 0.03);
   display: flex;
   flex-direction: column;
+}
+
+[data-theme="light"] body {
+  box-shadow: 0 0 34px rgba(15, 23, 42, 0.12);
+  border-left-color: rgba(17, 24, 39, 0.08);
+  border-right-color: rgba(17, 24, 39, 0.08);
 }
 
 /* Custom Scrollbar */
